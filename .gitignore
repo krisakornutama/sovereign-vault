@@ -1,0 +1,7 @@
+node_modules/
+dist/
+coverage/
+.vault-data/
+*.tmp-*
+*.log
+.DS_Store
