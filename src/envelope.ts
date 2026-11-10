@@ -4,6 +4,7 @@ import {
   randomBytes,
   sha256,
   toBufferSource,
+  toHex,
   utf8ToBytes,
 } from './bytes.js';
 import { VaultError, VaultIntegrityError } from './errors.js';
@@ -182,4 +183,24 @@ export async function openObject(
 
   // The plaintext hash sits inside the AAD, so GCM already proves it matches.
   return new Uint8Array(plaintext);
+}
+
+/**
+ * Key id stored in the header, without needing the key itself.
+ * Lets a vault with several keys pick the right one before decrypting.
+ */
+export function envelopeKeyId(envelope: Uint8Array): string {
+  if (envelope.length < HEADER_LENGTH + TAG_LENGTH) {
+    throw new VaultIntegrityError('envelope is truncated');
+  }
+  for (let index = 0; index < ENVELOPE_MAGIC.length; index += 1) {
+    if (envelope[index] !== ENVELOPE_MAGIC[index]) {
+      throw new VaultIntegrityError('envelope magic does not match');
+    }
+  }
+  const version = envelope[4];
+  if (version !== ENVELOPE_VERSION) {
+    throw new VaultError('invalid-envelope', `unsupported envelope version ${version}`);
+  }
+  return toHex(envelope.subarray(8, 8 + KEY_ID_LENGTH));
 }
