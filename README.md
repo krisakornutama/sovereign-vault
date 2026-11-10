@@ -103,6 +103,33 @@ if (appended) console.log(`anchored ${root}`);
 - A nonsensical `maxAgeMs` (negative / `NaN`) throws `RangeError` instead of
   quietly writing an anchor.
 
+## Streaming large values
+
+`putStream`/`getStream` seal and verify one chunk at a time (default 1 MiB), so a
+file larger than memory never has to be materialised:
+
+```ts
+import { createReadStream } from 'node:fs';
+
+await vault.putStream('backup/dump.tar', createReadStream('/srv/dump.tar'), {
+  chunkSize: 1024 * 1024,
+});
+
+for await (const chunk of vault.getStream('backup/dump.tar')) {
+  await sink.write(chunk); // each chunk is authenticated before it is handed out
+}
+```
+
+- Each chunk is sealed with its own salt/nonce and addressed by its SHA-256, so a
+  tampered chunk fails before later chunks are read.
+- `entry.chunks` lists `{ hash, size }` per chunk; the entry hash is SHA-256 over
+  the concatenated chunk hashes (plaintext digest for single-blob `put`).
+- Chunks are written before the index, so a crash leaves orphan blobs, never a
+  half-readable entry; overwriting or deleting removes the old chunk blobs.
+- `get()` still works on chunked entries by concatenating them — use
+  `getStream()` when the value may not fit in memory.
+- `rekey()` re-seals every chunk; `revokeKey()` scans them too.
+
 ## Keyring: rotation and revocation (M3)
 
 A vault opened with `masterKey` has a one-key ring. To rotate without downtime,
@@ -175,7 +202,7 @@ plaintext hash, size and timestamp. Writes are serialized so an interleaved
 `MemoryBlobStore` is for tests and ephemeral processes; `FileBlobStore` writes to
 a temporary file and renames it into place so a crash cannot truncate an object.
 
-## Limitations (M3)
+## Limitations (M4)
 
 - **Rollback needs a witness.** `anchorNow`/`verifyAnchor` and `expectedRoot`
   detect a store that went backwards, but only when the anchor log or the pin
@@ -186,7 +213,11 @@ a temporary file and renames it into place so a crash cannot truncate an object.
   come with `sovereign-attest` and the group-key milestone.
 - Key names are not encrypted (they appear only in AAD, never on disk as plain
   text, but they are the map key in the encrypted index).
-- No compression, deduplication or garbage collection yet.
+- No compression, deduplication or garbage collection yet. Chunked writes leave
+  orphan blobs when a write crashes before the index commits; nothing sweeps them
+  yet.
+- Chunk boundaries are not content-defined, so inserting bytes near the start
+  rewrites every following chunk (no delta sync yet).
 - `checkpointAnchor` does not schedule itself and takes no cross-process lock:
   two concurrent nightly runs can append two entries (both valid, sequence just
   advances). Keep a single scheduler per anchor log.
