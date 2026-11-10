@@ -1,6 +1,6 @@
 {
   "name": "sovereign-vault",
-  "version": "0.3.0",
+  "version": "0.4.0",
   "description": "Encrypted, tamper-evident persistence for Sovereign OS: content-addressed blobs sealed with AES-256-GCM keys derived per object, usable by the rule engine without a cloud.",
   "type": "module",
   "main": "./dist/index.js",

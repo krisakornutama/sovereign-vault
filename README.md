@@ -103,6 +103,37 @@ if (appended) console.log(`anchored ${root}`);
 - A nonsensical `maxAgeMs` (negative / `NaN`) throws `RangeError` instead of
   quietly writing an anchor.
 
+## Keyring: rotation and revocation (M3)
+
+A vault opened with `masterKey` has a one-key ring. To rotate without downtime,
+open with a keyring instead: new writes use the active key, old objects stay
+readable through the key that sealed them, and nothing is re-encrypted until you
+ask for it.
+
+```ts
+import { Keyring, Vault } from 'sovereign-vault';
+
+const keyring = await Keyring.create([{ key: currentKey, active: true }, { key: previousKey }]);
+const vault = await Vault.open({ store, keyring });
+
+const newId = await vault.rotateKey(freshKey); // new writes use freshKey
+await vault.rekey(); // re-seal every object under freshKey
+const dropped = await vault.revokeKey(oldId); // now safe; refuses while still in use
+```
+
+- `rotateKey(key)` adds a key and makes it active; reads keep working for every
+  key in the ring. The index is re-sealed under the new active key.
+- `rekey()` re-seals all objects (and the index) under the active key. Plaintext
+  is unchanged, so **the vault root does not change** and existing anchors stay
+  valid.
+- `revokeKey(id)` returns `false` for an unknown id, refuses the active key, and
+  refuses any key that still seals an object — so revocation can never quietly
+  destroy readable data. Run `rekey()` first.
+- `keyIds()` lists keys with the active one first; `activeKeyId()` tells you
+  which key new writes use.
+- Sharing keys between devices is still the caller's job (password manager,
+  printed recovery sheet, `sovereign-attest`). The vault never exports key bytes.
+
 ## Envelope format (v1)
 
 ```
@@ -125,24 +156,26 @@ plaintext hash, size and timestamp. Writes are serialized so an interleaved
 
 ## API
 
-| Member                                                    | Behaviour                                                            |
-| --------------------------------------------------------- | -------------------------------------------------------------------- |
-| `Vault.open({ store, masterKey, clock?, expectedRoot? })` | Validates the key, authenticates the index, enforces the pinned root |
-| `put(key, bytes)`                                         | Seals and stores; returns `{ key, hash, size, updatedAt }`           |
-| `get(key)`                                                | Verifies authentication and the index hash before returning          |
-| `has(key)` / `list()`                                     | Index lookups, no I/O                                                |
-| `delete(key)`                                             | Removes blob and index entry; `false` if absent                      |
-| `verifyAll()`                                             | Re-opens every object and reports failures instead of throwing       |
-| `root()`                                                  | Hex hash of the canonical index                                      |
-| `anchorNow(log)` / `verifyAnchor(log)`                    | Appends a checkpoint / fails when the store is older than it         |
-| `checkpointAnchor(vault, log, { maxAgeMs?, now? })`       | Idempotent nightly checkpoint: writes only when changed or stale     |
-| `saveSnapshot` / `loadSnapshot`                           | Versioned, checksummed state for the rule engine                     |
-| `MemoryAnchorLog` / `BlobAnchorLog`                       | Hash-chained append-only roots, in memory or on any `BlobStore`      |
+| Member                                                   | Behaviour                                                        |
+| -------------------------------------------------------- | ---------------------------------------------------------------- |
+| `Vault.open({ store, masterKey                           | keyring, clock?, expectedRoot? })`                               | Validates keys, authenticates the index, enforces the pinned root |
+| `put(key, bytes)`                                        | Seals and stores; returns `{ key, hash, size, updatedAt }`       |
+| `get(key)`                                               | Verifies authentication and the index hash before returning      |
+| `has(key)` / `list()`                                    | Index lookups, no I/O                                            |
+| `delete(key)`                                            | Removes blob and index entry; `false` if absent                  |
+| `verifyAll()`                                            | Re-opens every object and reports failures instead of throwing   |
+| `root()`                                                 | Hex hash of the canonical index                                  |
+| `anchorNow(log)` / `verifyAnchor(log)`                   | Appends a checkpoint / fails when the store is older than it     |
+| `checkpointAnchor(vault, log, { maxAgeMs?, now? })`      | Idempotent nightly checkpoint: writes only when changed or stale |
+| `saveSnapshot` / `loadSnapshot`                          | Versioned, checksummed state for the rule engine                 |
+| `MemoryAnchorLog` / `BlobAnchorLog`                      | Hash-chained append-only roots, in memory or on any `BlobStore`  |
+| `Keyring.create([{ key, active? }])` / `keyIdOfKey(key)` | Multi-key ring for rotation; key id derived from the key         |
+| `rotateKey(key)` / `rekey()` / `revokeKey(id)`           | New active key / re-seal all objects / drop an unused key        |
 
 `MemoryBlobStore` is for tests and ephemeral processes; `FileBlobStore` writes to
 a temporary file and renames it into place so a crash cannot truncate an object.
 
-## Limitations (M2)
+## Limitations (M3)
 
 - **Rollback needs a witness.** `anchorNow`/`verifyAnchor` and `expectedRoot`
   detect a store that went backwards, but only when the anchor log or the pin

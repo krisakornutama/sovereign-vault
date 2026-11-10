@@ -1,5 +1,6 @@
 export type VaultErrorCode =
   | 'invalid-key'
+  | 'unknown-key'
   | 'invalid-envelope'
   | 'invalid-root'
   | 'not-found'

@@ -27,4 +27,6 @@ export { MemoryBlobStore } from './store.js';
 export type { BlobStore } from './store.js';
 export { FileBlobStore } from './store-fs.js';
 export { Vault } from './vault.js';
+export { Keyring, keyIdOfKey } from './keyring.js';
+export type { VaultKeyInput } from './keyring.js';
 export type { VaultEntry, VaultOptions, VerifyFailure, VerifyReport } from './vault.js';
