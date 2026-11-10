@@ -1,6 +1,8 @@
+import { verifyAnchorRoot } from './anchor.js';
+import type { AnchorCheck, AnchorEntry, AnchorLog } from './anchor.js';
 import { bytesToUtf8, sha256, toHex, utf8ToBytes } from './bytes.js';
 import { KEY_ID_LENGTH, MASTER_KEY_LENGTH, openObject, sealObject } from './envelope.js';
-import { VaultError, VaultIntegrityError } from './errors.js';
+import { VaultError, VaultIntegrityError, VaultRollbackError } from './errors.js';
 import type { BlobStore } from './store.js';
 
 export interface VaultEntry {
@@ -25,6 +27,8 @@ export interface VaultOptions {
   readonly store: BlobStore;
   /** 32 random bytes. Losing it means losing the data; back it up outside the vault. */
   readonly masterKey: Uint8Array;
+  /** Optional root held outside the store; any older state fails to open. */
+  readonly expectedRoot?: string;
   readonly clock?: () => number;
 }
 
@@ -55,6 +59,11 @@ function assertValidKey(key: string): void {
   if (utf8ToBytes(key).length > MAX_KEY_BYTES) {
     throw new VaultError('invalid-key', `vault key must be at most ${MAX_KEY_BYTES} bytes`);
   }
+}
+
+function canonicalIndexJson(index: VaultIndex): string {
+  const entries = [...index.entries.entries()].sort(([a], [b]) => a.localeCompare(b));
+  return JSON.stringify({ version: index.version, entries: Object.fromEntries(entries) });
 }
 
 function parseIndex(plaintext: Uint8Array): VaultIndex {
@@ -129,6 +138,14 @@ export class Vault {
     const index: VaultIndex = sealedIndex
       ? await openIndex(masterKey, keyId, sealedIndex)
       : { version: 1, entries: new Map() };
+    if (options.expectedRoot !== undefined) {
+      const root = await rootOf(index);
+      if (root !== options.expectedRoot) {
+        throw new VaultRollbackError(
+          `vault root ${root} does not match the pinned root ${options.expectedRoot}`
+        );
+      }
+    }
     return new Vault(store, new Uint8Array(masterKey), keyId, index, options.clock ?? Date.now);
   }
 
@@ -140,6 +157,21 @@ export class Vault {
 
   has(key: string): boolean {
     return this.index.entries.has(key);
+  }
+
+  /** Hash of the canonical index: changes on every put/delete and never otherwise. */
+  async root(): Promise<string> {
+    return rootOf(this.index);
+  }
+
+  /** Appends the current root to an append-only anchor log. */
+  async anchorNow(anchor: AnchorLog, at: number = this.clock()): Promise<AnchorEntry> {
+    return anchor.append(await this.root(), at);
+  }
+
+  /** Fails when this vault is older than the anchor or the pinned root. */
+  async verifyAnchor(anchor: AnchorLog, expectedRoot?: string): Promise<AnchorCheck> {
+    return verifyAnchorRoot(anchor, await this.root(), expectedRoot);
   }
 
   async put(key: string, value: Uint8Array): Promise<VaultEntry> {
@@ -219,17 +251,12 @@ export class Vault {
       });
     }
   }
-
   private async writeIndex(): Promise<void> {
-    const snapshot = JSON.stringify({
-      version: this.index.version,
-      entries: Object.fromEntries(this.index.entries),
-    });
     const sealed = await sealObject(
       this.masterKey,
       this.keyId,
       INDEX_CONTEXT,
-      utf8ToBytes(snapshot)
+      utf8ToBytes(canonicalIndexJson(this.index))
     );
     await this.store.write(INDEX_PATH, sealed);
   }
@@ -240,6 +267,10 @@ export class Vault {
     this.tail = run;
     return run;
   }
+}
+
+async function rootOf(index: VaultIndex): Promise<string> {
+  return toHex(await sha256(utf8ToBytes(canonicalIndexJson(index))));
 }
 
 async function openIndex(

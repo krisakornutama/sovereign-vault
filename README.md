@@ -52,6 +52,34 @@ The snapshot is versioned and checksummed, so a truncated or edited file is
 rejected before it can be replayed into the engine. The payload is plain data,
 so the engine keeps its own serialization contract.
 
+## Rollback detection (M2)
+
+Integrity checks catch edited, truncated or swapped blobs, but an older copy of
+the whole store still authenticates perfectly. Two independent witnesses close
+that gap:
+
+```ts
+import { BlobAnchorLog, FileBlobStore } from 'sovereign-vault';
+
+// 1. Append the current root to a log kept somewhere else (second disk, synced
+//    folder, remote witness). Entries are hash-chained and append-only.
+const anchors = new BlobAnchorLog(new FileBlobStore('./.vault-anchors'));
+await vault.anchorNow(anchors); // after a sync round, nightly, or on shutdown
+
+// 2. On boot, fail closed if the store went backwards.
+await vault.verifyAnchor(anchors); // throws VaultRollbackError on mismatch
+
+// Or pin the root you last saw outside the vault (OS keychain, config sync):
+const pinned = await Vault.open({ store, masterKey, expectedRoot: lastRoot });
+```
+
+`vault.root()` hashes the canonical index, so it changes exactly when contents
+change and never because of a fresh nonce. The chain makes edits, deletions and
+reordering inside the anchor log detectable; a pinned root makes a wholesale
+rewrite — including rewriting the anchor log itself — detectable. Without either
+one the vault cannot tell a restored backup from a wiped store, so pick a
+checkpoint cadence and keep the pin outside the vault.
+
 ## Envelope format (v1)
 
 ```
@@ -74,24 +102,29 @@ plaintext hash, size and timestamp. Writes are serialized so an interleaved
 
 ## API
 
-| Member                                     | Behaviour                                                      |
-| ------------------------------------------ | -------------------------------------------------------------- |
-| `Vault.open({ store, masterKey, clock? })` | Validates the key, loads and authenticates the index           |
-| `put(key, bytes)`                          | Seals and stores; returns `{ key, hash, size, updatedAt }`     |
-| `get(key)`                                 | Verifies authentication and the index hash before returning    |
-| `has(key)` / `list()`                      | Index lookups, no I/O                                          |
-| `delete(key)`                              | Removes blob and index entry; `false` if absent                |
-| `verifyAll()`                              | Re-opens every object and reports failures instead of throwing |
-| `saveSnapshot` / `loadSnapshot`            | Versioned, checksummed state for the rule engine               |
+| Member                                                    | Behaviour                                                            |
+| --------------------------------------------------------- | -------------------------------------------------------------------- |
+| `Vault.open({ store, masterKey, clock?, expectedRoot? })` | Validates the key, authenticates the index, enforces the pinned root |
+| `put(key, bytes)`                                         | Seals and stores; returns `{ key, hash, size, updatedAt }`           |
+| `get(key)`                                                | Verifies authentication and the index hash before returning          |
+| `has(key)` / `list()`                                     | Index lookups, no I/O                                                |
+| `delete(key)`                                             | Removes blob and index entry; `false` if absent                      |
+| `verifyAll()`                                             | Re-opens every object and reports failures instead of throwing       |
+| `root()`                                                  | Hex hash of the canonical index                                      |
+| `anchorNow(log)` / `verifyAnchor(log)`                    | Appends a checkpoint / fails when the store is older than it         |
+| `saveSnapshot` / `loadSnapshot`                           | Versioned, checksummed state for the rule engine                     |
+| `MemoryAnchorLog` / `BlobAnchorLog`                       | Hash-chained append-only roots, in memory or on any `BlobStore`      |
 
 `MemoryBlobStore` is for tests and ephemeral processes; `FileBlobStore` writes to
 a temporary file and renames it into place so a crash cannot truncate an object.
 
-## Limitations (M1)
+## Limitations (M2)
 
-- **Rollback is not detected yet.** An attacker with write access to the whole
-  store can restore an older, internally consistent snapshot. The next milestone
-  anchors the index root in an append-only log / external witness.
+- **Rollback needs a witness.** `anchorNow`/`verifyAnchor` and `expectedRoot`
+  detect a store that went backwards, but only when the anchor log or the pin
+  lives where the vault attacker cannot rewrite it. Anchoring is an explicit
+  checkpoint, not part of every write, so bytes written after the last
+  checkpoint are protected by integrity only.
 - One device, one master key. Multi-device group keys, rotation and revocation
   come with `sovereign-attest` and the group-key milestone.
 - Key names are not encrypted (they appear only in AAD, never on disk as plain
@@ -106,4 +139,12 @@ npm run typecheck
 npm test
 npm run test:coverage   # gate: 90% lines/statements/functions, 80% branches
 npm run example
+npm run build           # dist/ with .d.ts for downstream packages
 ```
+
+## Roadmap link
+
+This package is milestone M1/M2 of the Sovereign OS roadmap
+(`sovereign-origin/docs/ROADMAP_2036.md`). Work items and their status live in
+`sovereign-origin/docs/LIVING-QUEUE.md`, which is append-only: entries are never
+deleted, only closed and superseded.

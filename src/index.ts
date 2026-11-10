@@ -1,3 +1,5 @@
+export { ANCHOR_GENESIS, BlobAnchorLog, MemoryAnchorLog, verifyAnchorRoot } from './anchor.js';
+export type { AnchorCheck, AnchorEntry, AnchorHead, AnchorLog, AnchorReport } from './anchor.js';
 export {
   bytesToUtf8,
   concatBytes,
@@ -16,7 +18,7 @@ export {
   openObject,
   sealObject,
 } from './envelope.js';
-export { VaultError, VaultIntegrityError } from './errors.js';
+export { VaultError, VaultIntegrityError, VaultRollbackError } from './errors.js';
 export type { VaultErrorCode } from './errors.js';
 export { decodeSnapshot, encodeSnapshot, loadSnapshot, saveSnapshot } from './snapshot.js';
 export { MemoryBlobStore } from './store.js';
