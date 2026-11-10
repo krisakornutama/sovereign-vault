@@ -80,6 +80,29 @@ rewrite — including rewriting the anchor log itself — detectable. Without ei
 one the vault cannot tell a restored backup from a wiped store, so pick a
 checkpoint cadence and keep the pin outside the vault.
 
+### Automatic checkpoints (nightly)
+
+`checkpointAnchor` is the timer-free helper a scheduler should call. Run it as
+often as you like: it appends only when the root changed or the head went stale,
+so a missed or duplicated nightly run cannot fork the chain.
+
+```ts
+import { checkpointAnchor } from 'sovereign-vault';
+
+// e.g. Task Scheduler / cron: 20:30 every night
+const { appended, root } = await checkpointAnchor(vault, anchors, {
+  maxAgeMs: 20 * 60 * 60 * 1000, // default: 20h
+});
+if (appended) console.log(`anchored ${root}`);
+```
+
+- Same root + fresh head → no-op (`appended: false`), so repeated runs are safe.
+- Root changed → appends immediately, whatever the age.
+- Head older than `maxAgeMs` → appends even when nothing changed, which proves
+  the vault is still being witnessed.
+- A nonsensical `maxAgeMs` (negative / `NaN`) throws `RangeError` instead of
+  quietly writing an anchor.
+
 ## Envelope format (v1)
 
 ```
@@ -112,6 +135,7 @@ plaintext hash, size and timestamp. Writes are serialized so an interleaved
 | `verifyAll()`                                             | Re-opens every object and reports failures instead of throwing       |
 | `root()`                                                  | Hex hash of the canonical index                                      |
 | `anchorNow(log)` / `verifyAnchor(log)`                    | Appends a checkpoint / fails when the store is older than it         |
+| `checkpointAnchor(vault, log, { maxAgeMs?, now? })`       | Idempotent nightly checkpoint: writes only when changed or stale     |
 | `saveSnapshot` / `loadSnapshot`                           | Versioned, checksummed state for the rule engine                     |
 | `MemoryAnchorLog` / `BlobAnchorLog`                       | Hash-chained append-only roots, in memory or on any `BlobStore`      |
 
@@ -130,6 +154,9 @@ a temporary file and renames it into place so a crash cannot truncate an object.
 - Key names are not encrypted (they appear only in AAD, never on disk as plain
   text, but they are the map key in the encrypted index).
 - No compression, deduplication or garbage collection yet.
+- `checkpointAnchor` does not schedule itself and takes no cross-process lock:
+  two concurrent nightly runs can append two entries (both valid, sequence just
+  advances). Keep a single scheduler per anchor log.
 
 ## Commands
 
