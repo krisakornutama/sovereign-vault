@@ -21,6 +21,8 @@ export {
 export { VaultError, VaultIntegrityError, VaultRollbackError } from './errors.js';
 export type { VaultErrorCode } from './errors.js';
 export { decodeSnapshot, encodeSnapshot, loadSnapshot, saveSnapshot } from './snapshot.js';
+export { DEFAULT_ANCHOR_MAX_AGE_MS, checkpointAnchor } from './checkpoint.js';
+export type { AnchorCheckpointOptions, AnchorCheckpointResult } from './checkpoint.js';
 export { MemoryBlobStore } from './store.js';
 export type { BlobStore } from './store.js';
 export { FileBlobStore } from './store-fs.js';
