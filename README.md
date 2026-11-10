@@ -191,6 +191,8 @@ plaintext hash, size and timestamp. Writes are serialized so an interleaved
 | `has(key)` / `list()`                                    | Index lookups, no I/O                                            |
 | `delete(key)`                                            | Removes blob and index entry; `false` if absent                  |
 | `verifyAll()`                                            | Re-opens every object and reports failures instead of throwing   |
+| `putStream(key, source, { chunkSize? })` / `getStream(key)` | Chunked write / read for values larger than memory             |
+| `pruneOrphans({ dryRun? })`                              | Deletes blobs no index entry references; returns `{ paths, bytes }` |
 | `root()`                                                 | Hex hash of the canonical index                                  |
 | `anchorNow(log)` / `verifyAnchor(log)`                   | Appends a checkpoint / fails when the store is older than it     |
 | `checkpointAnchor(vault, log, { maxAgeMs?, now? })`      | Idempotent nightly checkpoint: writes only when changed or stale |
