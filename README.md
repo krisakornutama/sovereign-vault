@@ -183,21 +183,23 @@ plaintext hash, size and timestamp. Writes are serialized so an interleaved
 
 ## API
 
-| Member                                                   | Behaviour                                                        |
-| -------------------------------------------------------- | ---------------------------------------------------------------- |
-| `Vault.open({ store, masterKey                           | keyring, clock?, expectedRoot? })`                               | Validates keys, authenticates the index, enforces the pinned root |
-| `put(key, bytes)`                                        | Seals and stores; returns `{ key, hash, size, updatedAt }`       |
-| `get(key)`                                               | Verifies authentication and the index hash before returning      |
-| `has(key)` / `list()`                                    | Index lookups, no I/O                                            |
-| `delete(key)`                                            | Removes blob and index entry; `false` if absent                  |
-| `verifyAll()`                                            | Re-opens every object and reports failures instead of throwing   |
-| `root()`                                                 | Hex hash of the canonical index                                  |
-| `anchorNow(log)` / `verifyAnchor(log)`                   | Appends a checkpoint / fails when the store is older than it     |
-| `checkpointAnchor(vault, log, { maxAgeMs?, now? })`      | Idempotent nightly checkpoint: writes only when changed or stale |
-| `saveSnapshot` / `loadSnapshot`                          | Versioned, checksummed state for the rule engine                 |
-| `MemoryAnchorLog` / `BlobAnchorLog`                      | Hash-chained append-only roots, in memory or on any `BlobStore`  |
-| `Keyring.create([{ key, active? }])` / `keyIdOfKey(key)` | Multi-key ring for rotation; key id derived from the key         |
-| `rotateKey(key)` / `rekey()` / `revokeKey(id)`           | New active key / re-seal all objects / drop an unused key        |
+| Member                                                      | Behaviour                                                           |
+| ----------------------------------------------------------- | ------------------------------------------------------------------- |
+| `Vault.open({ store, masterKey                              | keyring, clock?, expectedRoot? })`                                  | Validates keys, authenticates the index, enforces the pinned root |
+| `put(key, bytes)`                                           | Seals and stores; returns `{ key, hash, size, updatedAt }`          |
+| `get(key)`                                                  | Verifies authentication and the index hash before returning         |
+| `has(key)` / `list()`                                       | Index lookups, no I/O                                               |
+| `delete(key)`                                               | Removes blob and index entry; `false` if absent                     |
+| `verifyAll()`                                               | Re-opens every object and reports failures instead of throwing      |
+| `putStream(key, source, { chunkSize? })` / `getStream(key)` | Chunked write / read for values larger than memory                  |
+| `pruneOrphans({ dryRun? })`                                 | Deletes blobs no index entry references; returns `{ paths, bytes }` |
+| `root()`                                                    | Hex hash of the canonical index                                     |
+| `anchorNow(log)` / `verifyAnchor(log)`                      | Appends a checkpoint / fails when the store is older than it        |
+| `checkpointAnchor(vault, log, { maxAgeMs?, now? })`         | Idempotent nightly checkpoint: writes only when changed or stale    |
+| `saveSnapshot` / `loadSnapshot`                             | Versioned, checksummed state for the rule engine                    |
+| `MemoryAnchorLog` / `BlobAnchorLog`                         | Hash-chained append-only roots, in memory or on any `BlobStore`     |
+| `Keyring.create([{ key, active? }])` / `keyIdOfKey(key)`    | Multi-key ring for rotation; key id derived from the key            |
+| `rotateKey(key)` / `rekey()` / `revokeKey(id)`              | New active key / re-seal all objects / drop an unused key           |
 
 `MemoryBlobStore` is for tests and ephemeral processes; `FileBlobStore` writes to
 a temporary file and renames it into place so a crash cannot truncate an object.

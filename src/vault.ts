@@ -43,6 +43,13 @@ export interface VerifyReport {
   readonly failures: readonly VerifyFailure[];
 }
 
+export interface PruneReport {
+  /** Stored paths no index entry points at any more (all under objects/ or chunks/). */
+  readonly paths: readonly string[];
+  /** Total bytes those blobs occupy, measured before they are removed. */
+  readonly bytes: number;
+}
+
 export interface VaultOptions {
   readonly store: BlobStore;
   /** 32 random bytes. Losing it means losing the data; back it up outside the vault. */
@@ -496,6 +503,36 @@ export class Vault {
       }
     }
     return { checked: keys.length, failures };
+  }
+
+  /**
+   * Removes blobs no index entry references — the leftovers of a write that was
+   * interrupted before its index commit, or of a chunk overwritten by a crash.
+   *
+   * The index is authoritative, so anything it does not point at is unreadable
+   * garbage. Runs through the write queue, and `dryRun` only reports. Progress
+   * already referenced by the index is never touched, even when a chunk is
+   * missing; `verifyAll()` reports that case instead.
+   */
+  async pruneOrphans(options: { readonly dryRun?: boolean } = {}): Promise<PruneReport> {
+    return this.runExclusive(async () => {
+      const referenced = new Set<string>();
+      for (const [key, entry] of this.index.entries) {
+        for (const path of await this.blobPaths(key, entry)) referenced.add(path);
+      }
+      const paths: string[] = [];
+      let bytes = 0;
+      for (const prefix of [OBJECT_PREFIX, CHUNK_PREFIX]) {
+        for (const path of await this.store.list(prefix)) {
+          if (referenced.has(path)) continue;
+          const blob = await this.store.read(path);
+          if (blob) bytes += blob.length;
+          paths.push(path);
+          if (!options.dryRun) await this.store.remove(path);
+        }
+      }
+      return { paths, bytes };
+    });
   }
 
   private activeKey(): { readonly key: Uint8Array; readonly id: Uint8Array } {
